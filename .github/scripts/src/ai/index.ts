@@ -240,10 +240,12 @@ async function run({
   const details = `
 <details><summary>Details</summary>
 
-Workflow run:
+### Workflow run:
+
 ${getWorkflowRunUrl(context)}
 
-Usage:
+### Usage:
+
 \`\`\`json
 ${JSON.stringify(response.usage, null, 2)}
 \`\`\`
