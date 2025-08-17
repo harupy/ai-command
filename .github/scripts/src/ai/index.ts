@@ -1,7 +1,7 @@
 import type { getOctokit } from "@actions/github";
 import type { context as ContextType } from "@actions/github";
 import { components } from "@octokit/openapi-webhooks-types";
-import { formatDiff } from "./diff";
+import { formatDiffHunk } from "./diff";
 
 import OpenAI from "openai";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -171,7 +171,9 @@ export async function ai({
   const { repo, owner } = context.repo;
   const pull_number = context.payload.pull_request?.number || 0;
   const { commit_id, path, in_reply_to_id: in_reply_to } = payload;
-  const systemMessage = createSystemMessage(formatDiff(payload.diff_hunk));
+  const systemMessage = createSystemMessage(
+    formatDiffHunk(payload.diff_hunk) || ""
+  );
   const messages = await generateMessages(github, owner, repo, payload);
   const answer = await chatCompletions({
     apiKey,

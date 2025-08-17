@@ -27,6 +27,11 @@ class DiffParser {
     this.lines = diffText.split("\n");
   }
 
+  static parseDiffHunk(hunkText: string): DiffHunk | null {
+    const parser = new DiffParser(hunkText);
+    return parser.parseHunk();
+  }
+
   parse(): FileDiff[] {
     const fileDiffs: FileDiff[] = [];
 
@@ -329,6 +334,33 @@ class TextFormatter {
   formatDiff(fileDiffs: FileDiff[]): string {
     return fileDiffs.map(fd => this.formatFileDiff(fd)).join("\n");
   }
+
+  formatSingleHunk(hunk: DiffHunk): string {
+    const lines: string[] = [];
+
+    // Column headers
+    const oldHeader = this.center("Old", this.lineWidth);
+    const newHeader = this.center("New", this.lineWidth);
+    lines.push(`${oldHeader} │ ${newHeader}`);
+    lines.push("─".repeat(this.lineWidth) + "─┼─" + "─".repeat(this.lineWidth));
+
+    // Process the hunk
+    const pairedLines = this.pairDiffLines(hunk.lines);
+    for (const [oldLine, newLine] of pairedLines) {
+      const formatted = this.formatLinePair(oldLine, newLine);
+      lines.push(formatted);
+    }
+
+    return lines.map(s => s.trimEnd()).join("\n");
+  }
+}
+
+export function formatDiffHunk(hunkText: string): string | null {
+  const hunk = DiffParser.parseDiffHunk(hunkText);
+  if (!hunk) return null;
+
+  const formatter = new TextFormatter();
+  return formatter.formatSingleHunk(hunk);
 }
 
 export function formatDiff(diffHunk: string): string {
