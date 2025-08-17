@@ -12,6 +12,7 @@ type Comment =
   components["schemas"]["webhook-pull-request-review-comment-created"]["comment"];
 
 function createSystemMessage(code: string): ChatCompletionMessageParam {
+  console.log(code);
   return {
     role: "system",
     content: `
