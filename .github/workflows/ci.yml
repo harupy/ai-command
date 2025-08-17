@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+
+      - name: Install and build
+        working-directory: .github/scripts
+        run: |
+          npm ci && npm run build
+
+      - name: Run
+        uses: actions/github-script@v7
+        env:
+          OPENAI_API_KEY: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_BASE: https://models.github.ai/inference
+        with:
+          script: |
+            const { ai } = require('./.github/scripts/dist/bundle.js');
+            await ai({ github, context });
