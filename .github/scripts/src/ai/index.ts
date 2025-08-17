@@ -14,14 +14,15 @@ type Core = typeof core_;
 type Context = typeof ContextType;
 type ReviewCommentCreated =
   components["schemas"]["webhook-pull-request-review-comment-created"];
-type Comment = ReviewCommentCreated["comment"];
-type AuthorAssociation = Comment["author_association"];
+type ReviewComment = Awaited<
+  ReturnType<GitHub["rest"]["pulls"]["getReviewComment"]>
+>["data"];
+type AuthorAssociation = ReviewComment["author_association"];
 
 function createSystemMessage(
   code: string,
   file: string
 ): ChatCompletionMessageParam {
-  console.log(code);
   return {
     role: "system",
     content: `
@@ -44,7 +45,6 @@ async function chatCompletions({
   baseUrl: string;
   messages: ChatCompletionMessageParam[];
 }): Promise<ChatCompletion> {
-  console.log(messages);
   const client = new OpenAI({
     apiKey,
     baseURL: baseUrl,
@@ -59,9 +59,9 @@ const COMMAND_PREFIX_REGEX = /^!ai\s+/;
 const AI_RESPONSE_MARKER = "<!-- AI_RESPONSE -->";
 
 function commentToMessage({
-  login,
+  user,
   body,
-}: SimpleComment): ChatCompletionMessageParam {
+}: ReviewComment): ChatCompletionMessageParam {
   let role: "user" | "assistant";
   let prefix: string;
   if (body.includes(AI_RESPONSE_MARKER)) {
@@ -69,7 +69,7 @@ function commentToMessage({
     prefix = "";
   } else {
     role = "user";
-    prefix = `(${login}): `;
+    prefix = `(${user.login}): `;
   }
   const content =
     prefix +
@@ -85,12 +85,6 @@ function commentToMessage({
   };
 }
 
-type SimpleComment = {
-  login: string;
-  body: string;
-  created_at: string;
-};
-
 async function fetchReplies({
   github,
   owner,
@@ -103,31 +97,24 @@ async function fetchReplies({
   repo: string;
   pull_number: number;
   in_reply_to_id: number;
-}): Promise<SimpleComment[]> {
+}): Promise<ReviewComment[]> {
   const comments = await github.paginate(github.rest.pulls.listReviewComments, {
     owner,
     repo,
     pull_number,
   });
-  return comments
-    .filter(c => c.in_reply_to_id === in_reply_to_id)
-    .map(({ user, body, created_at }) => ({
-      login: user.login,
-      body,
-      created_at,
-    }));
+  return comments.filter(c => c.in_reply_to_id === in_reply_to_id);
 }
 
 async function generateMessages(
   github: GitHub,
-  context: Context
+  context: Context,
+  comment: ReviewComment
 ): Promise<ChatCompletionMessageParam[]> {
   const { owner, repo } = context.repo;
   const payload = context.payload as ReviewCommentCreated;
-  const { comment } = payload;
   const pull_number = payload.pull_request.number;
-
-  const comments: SimpleComment[] = [];
+  const comments: ReviewComment[] = [];
   if (comment.in_reply_to_id) {
     // Fetch replies in the same thread
     const replies = await fetchReplies({
@@ -140,27 +127,16 @@ async function generateMessages(
     comments.push(...replies);
 
     // Fetch the root comment
-    const {
-      data: { body, user, created_at },
-    } = await github.rest.pulls.getReviewComment({
+    const { data: rootComment } = await github.rest.pulls.getReviewComment({
       owner,
       repo,
       pull_number,
       comment_id: comment.in_reply_to_id,
     });
 
-    comments.push({
-      login: user.login,
-      body,
-      created_at,
-    });
+    comments.push(rootComment);
   } else {
-    const { user, body, created_at } = comment;
-    comments.push({
-      login: user?.login || "",
-      body,
-      created_at,
-    });
+    comments.push(comment);
   }
 
   comments.sort(
@@ -226,7 +202,11 @@ async function run({
 }): Promise<void> {
   const payload = context.payload as ReviewCommentCreated;
   const { repo, owner } = context.repo;
-  const { comment } = payload;
+  const { data: comment } = await github.rest.pulls.getReviewComment({
+    owner,
+    repo,
+    comment_id: payload.comment.id,
+  });
 
   // Ignore comments not starting with `!ai`
   if (!COMMAND_PREFIX_REGEX.test(comment.body)) {
@@ -252,13 +232,13 @@ async function run({
   }
 
   const { user, author_association } = comment;
-  validateCommentAuthor(user?.login || "", author_association);
+  validateCommentAuthor(user.login, author_association);
 
   const systemMessage = createSystemMessage(
     formatDiffHunk(comment.diff_hunk) || "",
     path
   );
-  const messages = await generateMessages(github, context);
+  const messages = await generateMessages(github, context, comment);
   const response = await chatCompletions({
     apiKey,
     baseUrl,
@@ -280,7 +260,7 @@ ${JSON.stringify(response.usage, null, 2)}
 </details>
 `;
   const reply = response.choices[0].message.content || "";
-  const body = `${reply}\n\n${details}`;
+  const body = `@${user.login} ${reply}\n\n${details}`;
   await postReplyComment({
     github,
     context,
