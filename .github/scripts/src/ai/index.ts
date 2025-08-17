@@ -150,7 +150,7 @@ export async function ai({
     throw new Error("OPENAI_API_BASE environment variable is not set");
   }
 
-  const payload = context.payload as Comment;
+  const payload = context.payload.comment as Comment;
   console.log(payload);
   const { user, author_association } = payload;
   if (!user) {
