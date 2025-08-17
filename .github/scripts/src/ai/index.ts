@@ -238,15 +238,15 @@ async function run({
     messages: [systemMessage, ...messages],
   });
   const details = `
-<details>
-<summary>Details</summary>
+<details><summary>Details</summary>
 
-- [View workflow run](${getWorkflowRunUrl(context)})
-- Usage:
+Workflow run:
+${getWorkflowRunUrl(context)}
 
-  \`\`\`json
-  ${JSON.stringify(response, null, 2)}
-  \`\`\`
+Usage:
+\`\`\`json
+${JSON.stringify(response.usage, null, 2)}
+\`\`\`
 
 </details>
 `;
