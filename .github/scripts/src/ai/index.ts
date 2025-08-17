@@ -170,7 +170,7 @@ export async function ai({
 
   const { repo, owner } = context.repo;
   const pull_number = context.payload.pull_request?.number || 0;
-  const { commit_id, path, in_reply_to_id: in_reply_to } = payload;
+  const { commit_id, path, id: comment_id } = payload;
   const systemMessage = createSystemMessage(
     formatDiffHunk(payload.diff_hunk) || ""
   );
@@ -189,6 +189,6 @@ export async function ai({
     body: answer,
     commit_id,
     path,
-    in_reply_to,
+    in_reply_to: comment_id,
   });
 }
