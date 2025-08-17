@@ -24,4 +24,8 @@ jobs:
         with:
           script: |
             const { ai } = require('./.github/scripts/dist/bundle.js');
-            await ai({ github, context });
+            try {
+              await ai({ github, context });
+            } catch (error) {
+              console.error("Error occurred while calling AI:", error);
+            }

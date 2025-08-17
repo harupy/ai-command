@@ -177,6 +177,7 @@ export async function ai({
     baseUrl,
     messages: [systemMessage, ...messages],
   });
+  console.log("AI Response:", answer);
 
   await github.rest.pulls.createReviewComment({
     repo,
