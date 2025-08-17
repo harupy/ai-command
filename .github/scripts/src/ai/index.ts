@@ -129,6 +129,7 @@ async function generateMessages(
 
   const comments: SimpleComment[] = [];
   if (comment.in_reply_to_id) {
+    // Fetch replies in the same thread
     const replies = await fetchReplies({
       github,
       owner,
@@ -138,7 +139,10 @@ async function generateMessages(
     });
     comments.push(...replies);
 
-    const { data } = await github.rest.pulls.getReviewComment({
+    // Fetch the root comment
+    const {
+      data: { body, user, created_at },
+    } = await github.rest.pulls.getReviewComment({
       owner,
       repo,
       pull_number,
@@ -146,17 +150,18 @@ async function generateMessages(
     });
 
     comments.push({
-      login: data.user.login,
-      body: data.body,
-      created_at: data.created_at,
+      login: user.login,
+      body,
+      created_at,
+    });
+  } else {
+    const { user, body, created_at } = comment;
+    comments.push({
+      login: user?.login || "",
+      body,
+      created_at,
     });
   }
-
-  comments.push({
-    login: comment.user?.login || "",
-    body: comment.body,
-    created_at: comment.created_at,
-  });
 
   comments.sort(
     (a, b) =>
