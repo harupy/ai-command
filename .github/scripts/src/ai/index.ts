@@ -91,12 +91,13 @@ type SimpleComment = {
   created_at: string;
 };
 
-async function fetchPastComments(
+async function fetchParentComments(
   github: GitHub,
   owner: string,
   repo: string,
   in_reply_to_id?: number
 ): Promise<SimpleComment[]> {
+  console.log(in_reply_to_id);
   if (!in_reply_to_id) return [];
   const { data } = await github.rest.pulls.getReviewComment({
     owner,
@@ -108,13 +109,13 @@ async function fetchPastComments(
     body,
     created_at,
   } = data;
-  const next = await fetchPastComments(
+  const parents = await fetchParentComments(
     github,
     owner,
     repo,
     data.in_reply_to_id
   );
-  return [{ login, body, created_at }, ...next];
+  return [...parents, { login, body, created_at }];
 }
 
 async function generateMessages(
@@ -123,7 +124,7 @@ async function generateMessages(
   repo: string,
   comment: Comment
 ): Promise<ChatCompletionMessageParam[]> {
-  const comments = await fetchPastComments(
+  const comments = await fetchParentComments(
     github,
     owner,
     repo,
