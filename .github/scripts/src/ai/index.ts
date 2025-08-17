@@ -1,5 +1,6 @@
 import type { getOctokit } from "@actions/github";
 import type { context as ContextType } from "@actions/github";
+import * as core_ from "@actions/core";
 import { components } from "@octokit/openapi-webhooks-types";
 import { formatDiffHunk } from "./diff";
 
@@ -7,11 +8,17 @@ import OpenAI from "openai";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 type GitHub = ReturnType<typeof getOctokit>;
+type Core = typeof core_;
 type Context = typeof ContextType;
-type Comment =
-  components["schemas"]["webhook-pull-request-review-comment-created"]["comment"];
+type ReviewCommentCreated =
+  components["schemas"]["webhook-pull-request-review-comment-created"];
+type Comment = ReviewCommentCreated["comment"];
+type AuthorAssociation = Comment["author_association"];
 
-function createSystemMessage(code: string): ChatCompletionMessageParam {
+function createSystemMessage(
+  code: string,
+  file: string
+): ChatCompletionMessageParam {
   console.log(code);
   return {
     role: "system",
@@ -19,6 +26,8 @@ function createSystemMessage(code: string): ChatCompletionMessageParam {
 You are a helpful assistant for GitHub PR reviews. Your task is to reply to questions/requests on the following code changes.
 
 # Code Changes
+
+${file}:
 ${code}
 `,
   };
@@ -134,23 +143,64 @@ async function generateMessages(
   return comments.map(commentToMessage);
 }
 
-export async function ai({
+function validateCommentAuthor(
+  user: string,
+  authorAssociation: AuthorAssociation
+): void {
+  if (!["collaborator", "maintainer", "owner"].includes(authorAssociation)) {
+    throw new Error(
+      `User ${user} does not have permission to use this command. Only collaborators, maintainers, and owners can use this command.`
+    );
+  }
+}
+
+async function reply({
+  github,
+  context,
+  body,
+}: {
+  github: GitHub;
+  context: Context;
+  body: string;
+}) {
+  const payload = context.payload as ReviewCommentCreated;
+  const { repo, owner } = context.repo;
+  const {
+    comment: { commit_id, path, id: comment_id },
+    pull_request: { number: pull_number },
+  } = payload;
+  await github.rest.pulls.createReviewComment({
+    repo,
+    owner,
+    pull_number,
+    body,
+    commit_id,
+    path,
+    in_reply_to: comment_id,
+  });
+}
+
+async function run({
   github,
   context,
 }: {
   github: GitHub;
   context: Context;
 }): Promise<void> {
+  const payload = context.payload as ReviewCommentCreated;
   const { repo, owner } = context.repo;
-  const payload = context.payload.comment as Comment;
-  if (!COMMAND_PREFIX_REGEX.test(payload.body)) {
+  const { comment } = payload;
+
+  // Ignore comments not starting with `!ai`
+  if (!COMMAND_PREFIX_REGEX.test(comment.body)) {
     return;
   }
 
+  const { path, id: comment_id } = comment;
   await github.rest.reactions.createForPullRequestReviewComment({
     owner,
     repo,
-    comment_id: payload.id,
+    comment_id,
     content: "eyes",
   });
 
@@ -160,47 +210,59 @@ export async function ai({
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY environment variable is not set");
   }
-
   if (!baseUrl) {
     throw new Error("OPENAI_API_BASE environment variable is not set");
   }
 
-  console.log(payload);
-  const { user, author_association } = payload;
-  if (!user) {
-    return;
-  }
+  const { user, author_association } = comment;
+  validateCommentAuthor(user?.login || "", author_association);
 
-  if (
-    !["collaborator", "maintainer", "owner"].includes(
-      author_association.toLowerCase()
-    )
-  ) {
-    throw new Error(
-      `${user.login} does not have permission to use this command`
-    );
-  }
-
-  const pull_number = context.payload.pull_request?.number || 0;
-  const { commit_id, path, id: comment_id } = payload;
   const systemMessage = createSystemMessage(
-    formatDiffHunk(payload.diff_hunk) || ""
+    formatDiffHunk(comment.diff_hunk) || "",
+    path
   );
-  const messages = await generateMessages(github, owner, repo, payload);
-  const answer = await chatCompletions({
+  const messages = await generateMessages(github, owner, repo, comment);
+  const body = await chatCompletions({
     apiKey,
     baseUrl,
     messages: [systemMessage, ...messages],
   });
-  console.log("AI Response:", answer);
-
-  await github.rest.pulls.createReviewComment({
-    repo,
-    owner,
-    pull_number,
-    body: answer,
-    commit_id,
-    path,
-    in_reply_to: comment_id,
+  await reply({
+    github,
+    context,
+    body,
   });
+}
+
+async function ai({
+  github,
+  context,
+  core,
+}: {
+  github: GitHub;
+  context: Context;
+  core: Core;
+}): Promise<void> {
+  try {
+    await run({ github, context });
+  } catch (error) {
+    if (error instanceof Error) {
+      const {
+        runId,
+        repo: { repo, owner },
+      } = context;
+      const workflowRunUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
+      const body = [
+        "An error occurred while processing your request:",
+        error.message,
+        `[View Workflow](${workflowRunUrl})`,
+      ].join("\n\n");
+      await reply({
+        github,
+        context,
+        body,
+      });
+      core.setFailed(error.message);
+    }
+  }
 }
