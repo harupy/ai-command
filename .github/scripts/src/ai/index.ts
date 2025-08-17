@@ -39,7 +39,7 @@ async function chatCompletions({
     baseURL: baseUrl,
   });
   const response = await client.chat.completions.create({
-    model: "openai/gpt-4o",
+    model: "openai/gpt-5-mini",
     messages,
   });
   return response.choices[0].message.content || "";
