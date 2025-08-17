@@ -32,6 +32,7 @@ async function chatCompletions({
   baseUrl: string;
   messages: ChatCompletionMessageParam[];
 }): Promise<string> {
+  console.log(messages);
   const client = new OpenAI({
     apiKey,
     baseURL: baseUrl,
