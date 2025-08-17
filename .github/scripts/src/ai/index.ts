@@ -91,52 +91,72 @@ type SimpleComment = {
   created_at: string;
 };
 
-async function fetchParentComments(
-  github: GitHub,
-  owner: string,
-  repo: string,
-  in_reply_to_id?: number
-): Promise<SimpleComment[]> {
-  console.log(in_reply_to_id);
-  if (!in_reply_to_id) return [];
-  const { data } = await github.rest.pulls.getReviewComment({
+async function fetchReplies({
+  github,
+  owner,
+  repo,
+  pull_number,
+  in_reply_to_id,
+}: {
+  github: GitHub;
+  owner: string;
+  repo: string;
+  pull_number: number;
+  in_reply_to_id: number;
+}): Promise<SimpleComment[]> {
+  const comments = await github.paginate(github.rest.pulls.listReviewComments, {
     owner,
     repo,
-    comment_id: in_reply_to_id,
+    pull_number,
   });
-  const {
-    user: { login },
-    body,
-    created_at,
-  } = data;
-  const parents = await fetchParentComments(
-    github,
-    owner,
-    repo,
-    data.in_reply_to_id
-  );
-  return [...parents, { login, body, created_at }];
+  return comments
+    .filter(c => c.in_reply_to_id === in_reply_to_id)
+    .map(({ user, body, created_at }) => ({
+      login: user.login,
+      body,
+      created_at,
+    }));
 }
 
 async function generateMessages(
   github: GitHub,
-  owner: string,
-  repo: string,
-  comment: Comment
+  context: Context
 ): Promise<ChatCompletionMessageParam[]> {
-  const comments = await fetchParentComments(
-    github,
-    owner,
-    repo,
-    comment.in_reply_to_id
-  );
-  if (comment.user) {
+  const { owner, repo } = context.repo;
+  const payload = context.payload as ReviewCommentCreated;
+  const { comment } = payload;
+  const pull_number = payload.pull_request.number;
+
+  const comments: SimpleComment[] = [];
+  if (comment.in_reply_to_id) {
+    const replies = await fetchReplies({
+      github,
+      owner,
+      repo,
+      pull_number,
+      in_reply_to_id: comment.in_reply_to_id,
+    });
+    comments.push(...replies);
+
+    const { data } = await github.rest.pulls.getReviewComment({
+      owner,
+      repo,
+      pull_number,
+      comment_id: comment.in_reply_to_id,
+    });
+
     comments.push({
-      login: comment.user.login,
-      body: comment.body,
-      created_at: comment.created_at,
+      login: data.user.login,
+      body: data.body,
+      created_at: data.created_at,
     });
   }
+
+  comments.push({
+    login: comment.user?.login || "",
+    body: comment.body,
+    created_at: comment.created_at,
+  });
 
   comments.sort(
     (a, b) =>
@@ -172,6 +192,7 @@ async function postReplyComment({
     comment: { commit_id, path, id: comment_id },
     pull_request: { number: pull_number },
   } = payload;
+
   await github.rest.pulls.createReviewComment({
     repo,
     owner,
@@ -232,7 +253,7 @@ async function run({
     formatDiffHunk(comment.diff_hunk) || "",
     path
   );
-  const messages = await generateMessages(github, owner, repo, comment);
+  const messages = await generateMessages(github, context);
   const response = await chatCompletions({
     apiKey,
     baseUrl,
