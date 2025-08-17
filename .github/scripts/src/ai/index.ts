@@ -147,7 +147,11 @@ function validateCommentAuthor(
   user: string,
   authorAssociation: AuthorAssociation
 ): void {
-  if (!["collaborator", "maintainer", "owner"].includes(authorAssociation)) {
+  if (
+    !["collaborator", "maintainer", "owner"].includes(
+      authorAssociation.toLowerCase()
+    )
+  ) {
     throw new Error(
       `User ${user} does not have permission to use this command. Only collaborators, maintainers, and owners can use this command.`
     );
