@@ -45,6 +45,7 @@ async function chatCompletions({
   return response.choices[0].message.content || "";
 }
 
+const COMMAND_PREFIX_REGEX = /^!ai\s+/;
 const AI_RESPONSE_MARKER = "<!-- AI_RESPONSE -->";
 
 function commentToMessage({
@@ -63,7 +64,7 @@ function commentToMessage({
   const content =
     prefix +
     body
-      .replace(/^!ai\s+/, "")
+      .replace(COMMAND_PREFIX_REGEX, "")
       .replace(AI_RESPONSE_MARKER, "")
       .trim();
 
@@ -140,6 +141,19 @@ export async function ai({
   github: GitHub;
   context: Context;
 }): Promise<void> {
+  const { repo, owner } = context.repo;
+  const payload = context.payload.comment as Comment;
+  if (!COMMAND_PREFIX_REGEX.test(payload.body)) {
+    return;
+  }
+
+  await github.rest.reactions.createForIssueComment({
+    owner,
+    repo,
+    comment_id: payload.id,
+    content: "eyes",
+  });
+
   const apiKey = process.env.OPENAI_API_KEY;
   const baseUrl = process.env.OPENAI_API_BASE;
 
@@ -151,7 +165,6 @@ export async function ai({
     throw new Error("OPENAI_API_BASE environment variable is not set");
   }
 
-  const payload = context.payload.comment as Comment;
   console.log(payload);
   const { user, author_association } = payload;
   if (!user) {
@@ -168,7 +181,6 @@ export async function ai({
     );
   }
 
-  const { repo, owner } = context.repo;
   const pull_number = context.payload.pull_request?.number || 0;
   const { commit_id, path, id: comment_id } = payload;
   const systemMessage = createSystemMessage(
