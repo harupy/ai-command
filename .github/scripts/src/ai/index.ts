@@ -26,7 +26,7 @@ function createSystemMessage(
   return {
     role: "system",
     content: `
-You are a helpful assistant for GitHub PR reviews. Your task is to reply to questions/requests on the following code changes.
+You are a helpful assistant for GitHub PR reviews. Your task is to reply to questions/requests on the following code changes. Please make the response compact but comprehensive.
 
 # Code Changes
 
