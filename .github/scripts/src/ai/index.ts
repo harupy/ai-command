@@ -234,7 +234,7 @@ async function run({
   });
 }
 
-async function ai({
+export async function ai({
   github,
   context,
   core,
