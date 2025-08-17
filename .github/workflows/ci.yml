@@ -7,7 +7,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      models: read
+      pull-requests: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
 
       - name: Install and build
@@ -23,4 +27,9 @@ jobs:
         with:
           script: |
             const { ai } = require('./.github/scripts/dist/bundle.js');
-            await ai({ github, context });
+            try {
+              await ai({ github, context });
+            } catch (error) {
+              console.error("Error occurred while calling AI:", error);
+              core.setFailed(`AI call failed: ${error.message}`);
+            }

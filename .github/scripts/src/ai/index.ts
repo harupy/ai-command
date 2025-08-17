@@ -1,7 +1,7 @@
 import type { getOctokit } from "@actions/github";
 import type { context as ContextType } from "@actions/github";
 import { components } from "@octokit/openapi-webhooks-types";
-import { formatDiff } from "./diff";
+import { formatDiffHunk } from "./diff";
 
 import OpenAI from "openai";
 import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -12,6 +12,7 @@ type Comment =
   components["schemas"]["webhook-pull-request-review-comment-created"]["comment"];
 
 function createSystemMessage(code: string): ChatCompletionMessageParam {
+  console.log(code);
   return {
     role: "system",
     content: `
@@ -38,7 +39,7 @@ async function chatCompletions({
     baseURL: baseUrl,
   });
   const response = await client.chat.completions.create({
-    model: "gpt-5-mini",
+    model: "openai/gpt-4o",
     messages,
   });
   return response.choices[0].message.content || "";
@@ -150,7 +151,7 @@ export async function ai({
     throw new Error("OPENAI_API_BASE environment variable is not set");
   }
 
-  const payload = context.payload as Comment;
+  const payload = context.payload.comment as Comment;
   console.log(payload);
   const { user, author_association } = payload;
   if (!user) {
@@ -170,13 +171,16 @@ export async function ai({
   const { repo, owner } = context.repo;
   const pull_number = context.payload.pull_request?.number || 0;
   const { commit_id, path, in_reply_to_id: in_reply_to } = payload;
-  const systemMessage = createSystemMessage(formatDiff(payload.diff_hunk));
+  const systemMessage = createSystemMessage(
+    formatDiffHunk(payload.diff_hunk) || ""
+  );
   const messages = await generateMessages(github, owner, repo, payload);
   const answer = await chatCompletions({
     apiKey,
     baseUrl,
     messages: [systemMessage, ...messages],
   });
+  console.log("AI Response:", answer);
 
   await github.rest.pulls.createReviewComment({
     repo,
