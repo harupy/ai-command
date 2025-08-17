@@ -3,9 +3,11 @@ import type { context as ContextType } from "@actions/github";
 import * as core_ from "@actions/core";
 import { components } from "@octokit/openapi-webhooks-types";
 import { formatDiffHunk } from "./diff";
-
 import OpenAI from "openai";
-import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import {
+  ChatCompletionMessageParam,
+  ChatCompletion,
+} from "openai/resources/chat/completions";
 
 type GitHub = ReturnType<typeof getOctokit>;
 type Core = typeof core_;
@@ -41,17 +43,16 @@ async function chatCompletions({
   apiKey: string;
   baseUrl: string;
   messages: ChatCompletionMessageParam[];
-}): Promise<string> {
+}): Promise<ChatCompletion> {
   console.log(messages);
   const client = new OpenAI({
     apiKey,
     baseURL: baseUrl,
   });
-  const response = await client.chat.completions.create({
+  return await client.chat.completions.create({
     model: "openai/gpt-5-mini",
     messages,
   });
-  return response.choices[0].message.content || "";
 }
 
 const COMMAND_PREFIX_REGEX = /^!ai\s+/;
@@ -75,6 +76,7 @@ function commentToMessage({
     body
       .replace(COMMAND_PREFIX_REGEX, "")
       .replace(AI_RESPONSE_MARKER, "")
+      .replace(/<details>[\s\S]*?<\/details>/g, "")
       .trim();
 
   return {
@@ -147,18 +149,14 @@ function validateCommentAuthor(
   user: string,
   authorAssociation: AuthorAssociation
 ): void {
-  if (
-    !["collaborator", "maintainer", "owner"].includes(
-      authorAssociation.toLowerCase()
-    )
-  ) {
+  if (!["COLLABORATOR", "MAINTAINER", "OWNER"].includes(authorAssociation)) {
     throw new Error(
       `User ${user} does not have permission to use this command. Only collaborators, maintainers, and owners can use this command.`
     );
   }
 }
 
-async function reply({
+async function postReplyComment({
   github,
   context,
   body,
@@ -182,6 +180,14 @@ async function reply({
     path,
     in_reply_to: comment_id,
   });
+}
+
+function getWorkflowRunUrl(context: Context): string {
+  const {
+    runId,
+    repo: { repo, owner },
+  } = context;
+  return `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
 }
 
 async function run({
@@ -226,12 +232,27 @@ async function run({
     path
   );
   const messages = await generateMessages(github, owner, repo, comment);
-  const body = await chatCompletions({
+  const response = await chatCompletions({
     apiKey,
     baseUrl,
     messages: [systemMessage, ...messages],
   });
-  await reply({
+  const details = `
+<details>
+<summary>Details</summary>
+
+- [View workflow run](${getWorkflowRunUrl(context)})
+- Usage:
+
+  \`\`\`json
+  ${JSON.stringify(response, null, 2)}
+  \`\`\`
+
+</details>
+`;
+  const reply = response.choices[0].message.content || "";
+  const body = `${reply}\n\n${details}`;
+  await postReplyComment({
     github,
     context,
     body,
@@ -251,17 +272,12 @@ export async function ai({
     await run({ github, context });
   } catch (error) {
     if (error instanceof Error) {
-      const {
-        runId,
-        repo: { repo, owner },
-      } = context;
-      const workflowRunUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
       const body = [
         "An error occurred while processing your request:",
         error.message,
-        `[View Workflow](${workflowRunUrl})`,
+        `[View Workflow](${getWorkflowRunUrl(context)})`,
       ].join("\n\n");
-      await reply({
+      await postReplyComment({
         github,
         context,
         body,
