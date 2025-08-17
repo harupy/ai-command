@@ -147,7 +147,7 @@ export async function ai({
     return;
   }
 
-  await github.rest.reactions.createForIssueComment({
+  await github.rest.reactions.createForPullRequestReviewComment({
     owner,
     repo,
     comment_id: payload.id,
